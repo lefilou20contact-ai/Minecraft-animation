@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Minecraft Skin Viewer — GOD MODE</title>
+    <style>
+        body {
+            background:#0a0a0a;
+            color:white;
+            font-family:Arial, sans-serif;
+            text-align:center;
+            padding-top:30px;
+        }
+
+        input {
+            padding:12px;
+            width:260px;
+            border-radius:6px;
+            border:none;
+            font-size:16px;
+        }
+
+        button {
+            padding:12px 20px;
+            margin-left:10px;
+            background:#00c853;
+            border:none;
+            border-radius:6px;
+            color:white;
+            font-size:16px;
+            cursor:pointer;
+        }
+
+        button:hover {
+            background:#00e676;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Minecraft Skin Viewer — GOD MODE</h1>
+    <p>Entre un pseudo pour lancer l’intro cinématique</p>
+
+    <input id="username" placeholder="Ex: Dream, Notch, Technoblade...">
+    <button onclick="loadSkin()">Rechercher</button>
+
+    <div id="skin-wrapper" style="position:relative; width:650px; margin:40px auto;">
+        <div id="skin-container" style="position:relative;">
+            <canvas id="skin3d" width="650" height="700"></canvas>
+            <canvas id="fx-layer" width="650" height="700" style="position:absolute; top:0; left:0; pointer-events:none;"></canvas>
+            <canvas id="vortex-layer" width="650" height="700" style="position:absolute; top:0; left:0; pointer-events:none;"></canvas>
+
+            <div id="overlay-text" style="
+                position:absolute;
+                bottom:40px;
+                left:50%;
+                transform:translateX(-50%);
+                font-family: 'Montserrat', Arial, sans-serif;
+                font-size:38px;
+                color:white;
+                text-shadow:0 0 15px #00e5ff, 0 0 30px #00e5ff;
+                letter-spacing:4px;
+                opacity:0;
+                transition:opacity 0.8s ease, transform 0.8s ease;
+            ">
+                SKIN VIEWER
+            </div>
+
+            <div id="flash" style="
+                position:absolute;
+                top:0; left:0;
+                width:100%; height:100%;
+                background:white;
+                opacity:0;
+                pointer-events:none;
+                transition:opacity 0.2s ease;
+            "></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/skinview3d"></script>
+
+    <script>
+        let viewer;
+        let animations = [];
+        let currentAnim = 0;
+        let cameraAngle = 0;
+        let shakePower = 0;
+
+        let fxCanvas, fxCtx, particles = [];
+        let vortexCanvas, vortexCtx;
+        let overlayText, flashLayer;
+
+        /* ----------------------------
+           PARTICULES
+        ---------------------------- */
+        function initParticles() {
+            particles = [];
+            for (let i = 0; i < 150; i++) {
+                particles.push({
+                    x: Math.random() * fxCanvas.width,
+                    y: Math.random() * fxCanvas.height,
+                    vx: (Math.random() - 0.5) * 2.5,
+                    vy: (Math.random() - 0.5) * 2.5,
+                    size: Math.random() * 4 + 1,
+                    alpha: Math.random() * 0.8 + 0.2,
+                    color: `hsl(${Math.random() * 360}, 90%, 60%)`
+                });
+            }
+        }
+
+        function updateParticles() {
+            fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+
+            const grd = fxCtx.createRadialGradient(
+                fxCanvas.width / 2, fxCanvas.height / 2, 50,
+                fxCanvas.width / 2, fxCanvas.height / 2, 400
+            );
+            grd.addColorStop(0, "rgba(0,0,0,0.2)");
+            grd.addColorStop(1, "rgba(0,0,0,0.9)");
+            fxCtx.fillStyle = grd;
+            fxCtx.fillRect(0, 0, fxCanvas.width, fxCanvas.height);
+
+            particles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.alpha -= 0.004;
+
+                if (p.alpha <= 0) {
+                    p.x = Math.random() * fxCanvas.width;
+                    p.y = Math.random() * fxCanvas.height;
+                    p.alpha = Math.random() * 0.8 + 0.2;
+                }
+
+                fxCtx.globalAlpha = p.alpha;
+                fxCtx.fillStyle = p.color;
+                fxCtx.beginPath();
+                fxCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                fxCtx.fill();
+            });
+
+            requestAnimationFrame(updateParticles);
+        }
+
+        /* ----------------------------
+           VORTEX LUMINEUX
+        ---------------------------- */
+        let vortexAngle = 0;
+
+        function updateVortex() {
+            vortexCtx.clearRect(0, 0, vortexCanvas.width, vortexCanvas.height);
+
+            vortexAngle += 0.02;
+
+            for (let i = 0; i < 40; i++) {
+                const angle = vortexAngle + i * 0.3;
+                const radius = 120 + Math.sin(angle * 2) * 20;
+
+                const x = vortexCanvas.width / 2 + Math.cos(angle) * radius;
+                const y = vortexCanvas.height / 2 + Math.sin(angle) * radius;
+
+                vortexCtx.globalAlpha = 0.25;
+                vortexCtx.fillStyle = `hsl(${(i * 12) % 360}, 100%, 60%)`;
+                vortexCtx.beginPath();
+                vortexCtx.arc(x, y, 8, 0, Math.PI * 2);
+                vortexCtx.fill();
+            }
+
+            requestAnimationFrame(updateVortex);
+        }
+
+        /* ----------------------------
+           FLASH IMPACT
+        ---------------------------- */
+        function triggerFlash() {
+            flashLayer.style.opacity = "1";
+            setTimeout(() => flashLayer.style.opacity = "0", 120);
+        }
+
+        /* ----------------------------
+           SHAKE CAMÉRA
+        ---------------------------- */
+        function shakeCamera() {
+            if (shakePower <= 0 || !viewer) return;
+
+            viewer.camera.position.x += (Math.random() - 0.5) * shakePower;
+            viewer.camera.position.y += (Math.random() - 0.5) * shakePower;
+
+            shakePower *= 0.9;
+        }
+
+        function triggerShake(force = 3) {
+            shakePower = force;
+        }
+
+        /* ----------------------------
+           TEXTE ANIMÉ
+        ---------------------------- */
+        function showOverlayText(text) {
+            overlayText.textContent = text;
+            overlayText.style.opacity = "1";
+            overlayText.style.transform = "translateX(-50%) translateY(-10px)";
+            setTimeout(() => {
+                overlayText.style.opacity = "0";
+                overlayText.style.transform = "translateX(-50%) translateY(10px)";
+            }, 1600);
+        }
+
+        /* ----------------------------
+           CHARGEMENT DU SKIN (API FIX)
+        ---------------------------- */
+        async function loadSkin() {
+            const username = document.getElementById("username").value.trim();
+
+            fxCanvas = document.getElementById("fx-layer");
+            fxCtx = fxCanvas.getContext("2d");
+
+            vortexCanvas = document.getElementById("vortex-layer");
+            vortexCtx = vortexCanvas.getContext("2d");
+
+            overlayText = document.getElementById("overlay-text");
+            flashLayer = document.getElementById("flash");
+
+            initParticles();
+            requestAnimationFrame(updateParticles);
+            requestAnimationFrame(updateVortex);
+
+            try {
+                /* ----------------------------
+                   API FIX — PROFIL
+                ---------------------------- */
+                const profileRes = await fetch(`https://api.mojang.com/users/profiles/minecraft/${username}`);
+
+                if (!profileRes.ok) {
+                    showOverlayText("PSEUDO INTROUVABLE");
+                    return;
+                }
+
+                const profile = await profileRes.json();
+
+                if (!profile || !profile.id) {
+                    showOverlayText("PSEUDO INTROUVABLE");
+                    return;
+                }
+
+                const uuid = profile.id;
+
+                /* ----------------------------
+                   API FIX — SKIN
+                ---------------------------- */
+                const dataRes = await fetch(`https://sessionserver.mojang.com/session/minecraft/profile/${uuid}`);
+
+                if (!dataRes.ok) {
+                    showOverlayText("SKIN INACCESSIBLE");
+                    return;
+                }
+
+                const data = await dataRes.json();
+
+                if (!data.properties || !data.properties[0] || !data.properties[0].value) {
+                    showOverlayText("AUCUNE SKIN");
+                    return;
+                }
+
+                const decoded = JSON.parse(atob(data.properties[0].value));
+
+                if (!decoded.textures || !decoded.textures.SKIN || !decoded.textures.SKIN.url) {
+                    showOverlayText("SKIN INVALIDE");
+                    return;
+                }
+
+                const skinURL = decoded.textures.SKIN.url;
+
+                /* ----------------------------
+                   VIEWER 3D
+                ---------------------------- */
+                viewer = new skinview3d.SkinViewer({
+                    canvas: document.getElementById("skin3d"),
+                    width: 650,
+                    height: 700,
+                    skin: skinURL
+                });
+
+                viewer.camera.position.set(30, 30, 55);
+                viewer.autoRotate = true;
+                viewer.autoRotateSpeed = 1.8;
+
+                const light = viewer.scene.children.find(o => o.type === "DirectionalLight");
+                let lightAngle = 0;
+                setInterval(() => {
+                    lightAngle += 0.08;
+                    light.position.set(Math.sin(lightAngle) * 90, 75, Math.cos(lightAngle) * 90);
+                }, 18);
+
+                /* ----------------------------
+                   ANIMATIONS
+                ---------------------------- */
+                animations = [
+                    new skinview3d.WalkingAnimation(),
+                    new skinview3d.RunningAnimation(),
+                    new skinview3d.JumpingAnimation(),
+                    new skinview3d.WavingAnimation(),
+                    new skinview3d.StandingAnimation(),
+                    new skinview3d.RotatingAnimation(),
+
+                    {
+                        update: (player, time) => {
+                            player.rotation.y += 0.5;
+                        }
+                    },
+
+                    {
+                        update: (player, time) => {
+                            player.leftArm.rotation.x = -1.6;
+                            player.leftArm.rotation.y = -0.7;
+                            player.rightArm.rotation.x = 1.3;
+                            player.rightArm.rotation.y = 1.0;
+                            player.head.rotation.y = 0.3;
+                        }
+                    },
+
+                    {
+                        update: (player, time) => {
+                            const t = time * 0.32;
+                            player.rightArm.rotation.x = Math.sin(t) * 1.7;
+                            player.leftArm.rotation.x = Math.cos(t) * 1.7;
+                            player.rightLeg.rotation.x = Math.cos(t) * 1.3;
+                            player.leftLeg.rotation.x = Math.sin(t) * 1.3;
+                            player.position.y = Math.sin(t) * 1.7;
+                        }
+                    },
+
+                    {
+                        update: (player, time) => {
+                            player.rightArm.rotation.x = -0.6;
+                            player.rightArm.rotation.y = 1.1;
+                            player.leftArm.rotation.x = 0.5;
+                            player.leftArm.rotation.y = -0.6;
+                            player.head.rotation.y = 0.6;
+                        }
+                    }
+                ];
+
+                viewer.animation = animations[0];
+
+                /* ----------------------------
+                   REVEAL + FLASH
+                ---------------------------- */
+                showOverlayText(username.toUpperCase());
+                triggerFlash();
+
+                /* ----------------------------
+                   CYCLE D’ANIMATIONS
+                ---------------------------- */
+                setInterval(() => {
+                    currentAnim = Math.floor(Math.random() * animations.length);
+                    viewer.animation = animations[currentAnim];
+
+                    if (currentAnim >= 6) {
+                        triggerShake(3.5);
+                        triggerFlash();
+                        showOverlayText(["SPIN", "DAB", "DANCE", "POSE"][currentAnim - 6] || username.toUpperCase());
+                    } else {
+                        showOverlayText(username.toUpperCase());
+                    }
+                }, 2200);
+
+                /* ----------------------------
+                   CAMÉRA CINÉMATIQUE
+                ---------------------------- */
+                setInterval(() => {
+                    cameraAngle += 0.035;
+                    viewer.camera.position.x = Math.sin(cameraAngle) * 42;
+                    viewer.camera.position.z = Math.cos(cameraAngle) * 42;
+                    viewer.camera.position.y = 26 + Math.sin(cameraAngle * 2) * 5;
+                    viewer.camera.lookAt(0, 18, 0);
+                    shakeCamera();
+                }, 18);
+
+            } catch {
+                document.getElementById("skin-container").innerHTML = "<p style='color:red'>Erreur API.</p>";
+            }
+        }
+    </script>
+
+</body>
+</html>
